@@ -51,7 +51,7 @@ impl RemCtrlApp {
         let log_clone = self.event_log.clone();
         let local_ip = Self::get_local_ip();
 
-        *self.status.lock().unwrap() = AppStatus::Listening {
+        *self.status.lock().unwrap_or_else(|e| e.into_inner()) = AppStatus::Listening {
             local_ip: local_ip.clone(),
         };
 
@@ -62,7 +62,7 @@ impl RemCtrlApp {
 
             let res = run_server(
                 move |state| {
-                    let mut s = status_for_state.lock().unwrap();
+                    let mut s = status_for_state.lock().unwrap_or_else(|e| e.into_inner());
                     match state {
                         ConnectionState::Listening => {
                             *s = AppStatus::Listening {
@@ -79,7 +79,7 @@ impl RemCtrlApp {
                     ctx_for_state.request_repaint();
                 },
                 move |event| {
-                    let mut log = log_clone.lock().unwrap();
+                    let mut log = log_clone.lock().unwrap_or_else(|e| e.into_inner());
                     let json = serde_json::to_string(event).unwrap_or_else(|_| "{}".to_string());
                     log.push_back(json);
                     if log.len() > 30 {
@@ -91,12 +91,12 @@ impl RemCtrlApp {
             .await;
 
             if let Err(e) = res {
-                *status_clone.lock().unwrap() = AppStatus::Error {
+                *status_clone.lock().unwrap_or_else(|e| e.into_inner()) = AppStatus::Error {
                     message: e.to_string(),
                 };
                 ctx.request_repaint();
             } else {
-                *status_clone.lock().unwrap() = AppStatus::Idle;
+                *status_clone.lock().unwrap_or_else(|e| e.into_inner()) = AppStatus::Idle;
                 ctx.request_repaint();
             }
         });
@@ -108,8 +108,8 @@ impl RemCtrlApp {
         if let Some(handle) = self.server_handle.take() {
             handle.abort();
         }
-        *self.status.lock().unwrap() = AppStatus::Idle;
-        self.event_log.lock().unwrap().clear();
+        *self.status.lock().unwrap_or_else(|e| e.into_inner()) = AppStatus::Idle;
+        self.event_log.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 }
 
@@ -128,7 +128,7 @@ impl eframe::App for RemCtrlApp {
             // Section 1 — Status panel
             ui.vertical_centered(|ui| {
                 ui.add_space(10.0);
-                let status = self.status.lock().unwrap();
+                let status = self.status.lock().unwrap_or_else(|e| e.into_inner());
                 match &*status {
                     AppStatus::Idle => {
                         ui.heading("Not running");
@@ -150,7 +150,7 @@ impl eframe::App for RemCtrlApp {
 
             // Section 2 — Controls
             ui.vertical_centered(|ui| {
-                let status = self.status.lock().unwrap();
+                let status = self.status.lock().unwrap_or_else(|e| e.into_inner());
                 let is_idle = matches!(*status, AppStatus::Idle | AppStatus::Error { .. });
                 drop(status); // Release lock before any action
 
@@ -170,7 +170,7 @@ impl eframe::App for RemCtrlApp {
 
             // Section 3 — Event log
             ui.heading("Event log");
-            let log = self.event_log.lock().unwrap();
+            let log = self.event_log.lock().unwrap_or_else(|e| e.into_inner());
             if log.is_empty() {
                 ui.label(egui::RichText::new("No events yet").color(egui::Color32::GRAY));
             } else {
