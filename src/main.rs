@@ -20,6 +20,8 @@ struct RemCtrlApp {
     event_log: Arc<Mutex<VecDeque<String>>>,
     server_handle: Option<tokio::task::JoinHandle<()>>,
     runtime: Arc<tokio::runtime::Runtime>,
+    current_texture: Option<egui::TextureHandle>,
+    last_qr_ip: String,
 }
 
 impl RemCtrlApp {
@@ -29,6 +31,8 @@ impl RemCtrlApp {
             event_log: Arc::new(Mutex::new(VecDeque::new())),
             server_handle: None,
             runtime,
+            current_texture: None,
+            last_qr_ip: String::new(),
         }
     }
 
@@ -135,7 +139,17 @@ impl eframe::App for RemCtrlApp {
                     }
                     AppStatus::Listening { local_ip } => {
                         ui.heading("Waiting for connection...");
-                        ui.label(egui::RichText::new(local_ip).small());
+                        ui.label(egui::RichText::new(local_ip.clone()).small());
+
+                        if self.last_qr_ip != *local_ip {
+                            let qr_image = generate_qr_image(local_ip);
+                            self.current_texture = Some(ctx.load_texture("qr", qr_image, egui::TextureOptions::LINEAR));
+                            self.last_qr_ip = local_ip.clone();
+                        }
+                        if let Some(texture) = &self.current_texture {
+                            ui.image(texture);
+                            ui.label("Scan with RemCtrl app to connect");
+                        }
                     }
                     AppStatus::Connected { peer_addr } => {
                         ui.heading("Connected");
@@ -207,4 +221,41 @@ fn main() {
         Box::new(|_cc| Ok(Box::new(RemCtrlApp::new(rt)))),
     )
     .unwrap();
+}
+
+fn generate_qr_image(ip: &str) -> egui::ColorImage {
+    let uri = format!("remctrl://{}:9847", ip);
+    let code = qrcode::QrCode::new(uri.as_bytes()).unwrap_or_else(|_| qrcode::QrCode::new(b"error").unwrap());
+    
+    let width = code.width();
+    let min_size = 160;
+    let mut scale = min_size / width;
+    if min_size % width != 0 {
+        scale += 1;
+    }
+    if scale < 4 {
+        scale = 4;
+    }
+    
+    let scaled_width = width * scale;
+    let mut pixels = Vec::with_capacity(scaled_width * scaled_width * 4);
+    let colors = code.to_colors();
+    
+    for y in 0..width {
+        for _sy in 0..scale {
+            for x in 0..width {
+                let is_dark = colors[y * width + x] == qrcode::Color::Dark;
+                let rgba = if is_dark {
+                    [0, 0, 0, 255]
+                } else {
+                    [255, 255, 255, 255]
+                };
+                for _sx in 0..scale {
+                    pixels.extend_from_slice(&rgba);
+                }
+            }
+        }
+    }
+    
+    egui::ColorImage::from_rgba_unmultiplied([scaled_width, scaled_width], &pixels)
 }
